@@ -1,0 +1,73 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: findback
+      POSTGRES_USER: findback
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure database password}
+    volumes: ["pg_data:/var/lib/postgresql/data"]
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U findback"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [internal]
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+  api:
+    build: {context: .., dockerfile: deploy/Dockerfile}
+    restart: unless-stopped
+    env_file: ../backend/.env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://findback:${POSTGRES_PASSWORD}@db:5432/findback
+      PUBLIC_ORIGIN: https://${DOMAIN}
+      ALLOWED_HOSTS: ${DOMAIN}
+      COOKIE_SECURE: "true"
+      REQUIRE_MODERATION: "true"
+      DEV_BOT_BYPASS: "false"
+      REDIS_URL: redis://redis:6379/0
+    volumes: ["app_data:/app/backend/data"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
+    networks: [internal]
+  worker:
+    build: {context: .., dockerfile: deploy/Dockerfile}
+    restart: unless-stopped
+    env_file: ../backend/.env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://findback:${POSTGRES_PASSWORD}@db:5432/findback
+      PUBLIC_ORIGIN: https://${DOMAIN}
+      ALLOWED_HOSTS: ${DOMAIN}
+      COOKIE_SECURE: "true"
+      REQUIRE_MODERATION: "true"
+      DEV_BOT_BYPASS: "false"
+      REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "app.worker"]
+    volumes: ["app_data:/app/backend/data"]
+    depends_on: [api]
+    networks: [internal]
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment: {DOMAIN: "${DOMAIN:?Configure domain}"}
+    ports: ["80:80", "443:443"]
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data", "caddy_config:/config"]
+    networks:
+      internal: {ipv4_address: 172.28.0.10}
+    depends_on: [api]
+networks:
+  internal:
+    ipam:
+      config: [{subnet: 172.28.0.0/24}]
+volumes:
+  pg_data:
+  app_data:
+  caddy_data:
+  caddy_config:

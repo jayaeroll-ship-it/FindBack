@@ -1,0 +1,10 @@
+{$DOMAIN} {
+    encode zstd gzip
+    request_body {
+        max_size 26MB
+    }
+    reverse_proxy api:8000
+    # Caddy obtains TLS certificates and redirects HTTP to HTTPS automatically.
+    # HSTS is added by FastAPI only after a correctly forwarded HTTPS request.
+    # Access logging is deliberately disabled: paths may contain reset tokens.
+}
